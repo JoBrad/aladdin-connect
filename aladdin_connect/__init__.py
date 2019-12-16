@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Dict, Any
 
@@ -63,7 +64,7 @@ class AladdinConnectClient:
 
         if devices:
             for device in devices:
-                doors += device['doors']
+                doors += [Door(self, **d) for d in device['doors']]
 
         return doors
 
@@ -221,3 +222,70 @@ class AladdinConnectClient:
             'id': index,
             'procedure': 'write'
         }
+
+
+class Door:
+    _CLIENT = None
+
+    def __init__(self, client, **doorInfo):
+        self._CLIENT = client
+        self._INFO = doorInfo
+
+    def __str__(self):
+        return json.dumps(self._INFO)
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.__str__()})'
+
+    def _get_updated_state(self):
+        device_doors = self._CLIENT._get_doors_for_device(self.device_id)
+        for door in device_doors:
+            if door['door_number'] == self.door_number:
+                self._INFO = door
+                break
+        return self._INFO
+
+    def _reset_status(self, desired_state):
+        """
+        Used when the door is connected, but the state is unknown (can happen if the request times out)
+        """
+        new_op = self.open if desired_state == self._CLIENT.DOOR_STATUS_OPEN else self.close
+        current_status = self.status()
+        for _i in range(2):
+            if current_status == self._CLIENT.DOOR_STATUS_UNKNOWN:
+                new_op()
+                current_status = self.status()
+
+    def open(self):
+        self._CLIENT.open_door(self.device_id, self.door_number)
+        self._get_updated_state()
+        return self.status
+
+    def close(self):
+        self._CLIENT.close_door(self.device_id, self.door_number)
+        self._get_updated_state()
+        return self.status
+
+    @property
+    def link_status(self):
+        return self._INFO.get('link_status', None)
+
+    @property
+    def name(self):
+        return self._INFO.get('name', None)
+
+    @property
+    def door_number(self):
+        return self._INFO.get('door_number', None)
+
+    @property
+    def device_id(self):
+        return self._INFO.get('device_id', None)
+
+    @property
+    def status(self):
+        return self._INFO.get('status', None)
+
+    def update_status(self):
+        self._get_updated_state()
+        return self.status
